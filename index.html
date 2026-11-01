@@ -202,7 +202,7 @@ const addDays=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x;};
 const fromIso=s=>{const [y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d);};
 const sum=a=>a.reduce((s,x)=>s+(+x.amount||0),0);
 const monthly=s=>s.interval==='jahr'?(+s.amount||0)/12:(+s.amount||0);
-function parseAmount(v){v=String(v).trim().replace(/[€\s]/g,'');if(v.includes(','))v=v.replace(/\./g,'').replace(',','.');const n=parseFloat(v);return isFinite(n)?Math.round(n*100)/100:NaN;}
+function parseAmount(v){v=String(v).replace(/[^\d,.\-]/g,'');if(v.includes(','))v=v.replace(/\./g,'').replace(',','.');const n=parseFloat(v);return isFinite(n)?Math.round(n*100)/100:NaN;}
 function isoWeek(d){const t=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));const day=t.getUTCDay()||7;t.setUTCDate(t.getUTCDate()+4-day);const y=new Date(Date.UTC(t.getUTCFullYear(),0,1));return Math.ceil(((t-y)/864e5+1)/7);}
 const monthName=d=>d.toLocaleDateString('de-DE',{month:'long'});
 
@@ -329,18 +329,23 @@ function dayLabel(ds){const t=iso(new Date()),y=iso(addDays(new Date(),-1));if(d
 let armed=null;
 function itemRow(t,withDel){return `<div class="item"><span class="dot" style="background:${catColor(t.cat)}"></span><div class="txt"><b>${esc(t.note||t.cat)}</b><span>${esc(t.note?t.cat:'')}${withDel?'':(t.note?' · ':'')+(withDel?'':dayLabel(t.date))}</span></div><span class="num">${money(t.amount)}</span>${withDel?`<button class="x${armed===t.id?' armed':''}" data-act="deltx" data-id="${t.id}" aria-label="Eintrag löschen">${armed===t.id?'Löschen':'×'}</button>`:''}</div>`;}
 
-let lastCat='Lebensmittel';
+let lastCat='Lebensmittel', justAdded=null, prefill=null;
+function apCard(){const ja=justAdded&&S.tx.find(t=>t.id===justAdded);if(!ja)return '';
+  return `<section class="card" style="border-color:var(--accent);border-width:2px"><div class="card-head"><h2>Per Apple Pay eingetragen</h2><span class="num" style="font-size:18px">${money(ja.amount)}</span></div>
+  <p class="muted small">${esc(ja.note||'Ohne Händlername')}. Falsche Kategorie? Tipp auf die richtige.</p>
+  <div class="chips" role="radiogroup" aria-label="Kategorie">${catNames().map(c=>`<label><input type="radio" name="apcat" value="${esc(c)}"${c===ja.cat?' checked':''}><span><span class="dot" style="background:${catColor(c)}"></span>${esc(c)}</span></label>`).join('')}</div>
+  <div class="two"><button class="btn" data-act="apok">Passt so</button><button class="btn-ghost" data-act="apundo">Rückgängig</button></div></section>`;}
 function vAusgaben(){
   if(!catNames().includes(lastCat))lastCat=catNames()[0];
   const sorted=[...S.tx].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,120);
   const groups={};sorted.forEach(t=>(groups[t.date]=groups[t.date]||[]).push(t));
   const list=Object.entries(groups).map(([d,ts])=>`<div class="day-h"><span>${dayLabel(d)}</span><span class="num">${money(sum(ts))}</span></div><div class="list">${ts.map(t=>itemRow(t,true)).join('')}</div>`).join('');
-  return `${sampleBanner()}
+  return `${apCard()}${sampleBanner()}
   <form class="card" id="txform" autocomplete="off">
     <h2>Ausgabe eintragen</h2>
     <label class="f">Betrag in €<input class="amount-in num" id="tx-amount" inputmode="decimal" placeholder="0,00" required></label>
     <div class="chips" role="radiogroup" aria-label="Kategorie">${catNames().map(c=>`<label><input type="radio" name="cat" value="${esc(c)}"${c===lastCat?' checked':''}><span><span class="dot" style="background:${catColor(c)}"></span>${esc(c)}</span></label>`).join('')}</div>
-    <div class="two"><label class="f">Wofür? (optional)<input id="tx-note" placeholder="z. B. Rewe"></label><label class="f">Datum<input type="date" id="tx-date" value="${iso(new Date())}"></label></div>
+    <div class="two"><label class="f">Wofür? (optional)<input id="tx-note" placeholder="z. B. Rewe" value="${esc(prefill?prefill.note:'')}"></label><label class="f">Datum<input type="date" id="tx-date" value="${iso(new Date())}"></label></div>
     <button class="btn" type="submit">Eintragen</button>
   </form>
   <section class="card"><div class="card-head"><h2>Verlauf</h2><span class="muted small">${S.tx.length} Einträge</span></div>${list||'<p class="muted">Noch nichts eingetragen. Deine erste Ausgabe erscheint hier.</p>'}</section>`;
@@ -449,7 +454,7 @@ document.addEventListener('submit',e=>{
   if(!(a>0)){toast('Gib einen Betrag größer als 0 ein');return;}
   const cat=(e.target.querySelector('input[name=cat]:checked')||{}).value||'Sonstiges';lastCat=cat;
   S.tx.push({id:uid(),date:document.getElementById('tx-date').value||iso(new Date()),amount:a,cat,note:document.getElementById('tx-note').value.trim()});
-  touch();render(true);toast(money(a)+' eingetragen');
+  prefill=null;touch();render(true);toast(money(a)+' eingetragen');
 });
 
 document.addEventListener('click',e=>{
@@ -458,6 +463,8 @@ document.addEventListener('click',e=>{
   if(!['deltx','wipe','delcat','delextra'].includes(act))armed=null;
   if(act==='deltx'){const id=b.dataset.id;if(armed===id){S.tx=S.tx.filter(t=>t.id!==id);armed=null;touch();toast('Gelöscht');}else armed=id;render(true);}
   else if(act==='addrow'){const k=b.dataset.k;S[k].push(k==='budgets'?{id:uid(),cat:catNames().find(c=>!S.budgets.some(x=>x.cat===c))||'Sonstiges',amount:0}:{id:uid(),name:'',amount:0,interval:'monat'});touch();render(true);const ins=app.querySelectorAll(`[data-k="${k}"][data-f="${k==='budgets'?'amount':'name'}"]`);ins.length&&ins[ins.length-1].focus();}
+  else if(act==='apok'){justAdded=null;render(true);toast('Gespeichert');}
+  else if(act==='apundo'){S.tx=S.tx.filter(t=>t.id!==justAdded);justAdded=null;touch();render(true);toast('Wieder entfernt');}
   else if(act==='showextra'){document.getElementById('extraform').hidden=false;b.hidden=true;document.getElementById('ex-note').focus();}
   else if(act==='addextra'){const a=parseAmount(document.getElementById('ex-amount').value);if(!(a>0)){toast('Gib einen Betrag größer als 0 ein');return;}S.extra.push({id:uid(),date:document.getElementById('ex-date').value||iso(new Date()),amount:a,note:document.getElementById('ex-note').value.trim()});touch();render(true);toast('+'+money(a)+' eingetragen');}
   else if(act==='delextra'){const id=b.dataset.id;if(armed==='ex'+id){S.extra=S.extra.filter(t=>t.id!==id);armed=null;touch();toast('Gelöscht');}else armed='ex'+id;render(true);}
@@ -486,8 +493,22 @@ document.addEventListener('input',e=>{
   else if(el.dataset.goal){const f=el.dataset.goal;S.goal=S.goal||{};S.goal[f]=(f==='amount'||f==='saved')?(parseAmount(el.value)||0):el.value;touch();
     const gr=document.getElementById('goalres');if(gr){const tmp=document.createElement('div');tmp.innerHTML=vSparen();const n=tmp.querySelector('#goalres');if(n)gr.innerHTML=n.innerHTML;}}
 });
-document.addEventListener('change',e=>{if(e.target.dataset&&e.target.dataset.cat){render(true);return;}if(e.target.id==='paid'){render(true);toast('Gehalt gespeichert');return;}if(e.target.tagName==='SELECT'&&e.target.dataset.k)e.target.dispatchEvent(new Event('input',{bubbles:true}));});
+document.addEventListener('change',e=>{if(e.target.name==='apcat'){const t=S.tx.find(x=>x.id===justAdded);if(t){t.cat=e.target.value;touch();toast('Kategorie: '+t.cat);}return;}if(e.target.dataset&&e.target.dataset.cat){render(true);return;}if(e.target.id==='paid'){render(true);toast('Gehalt gespeichert');return;}if(e.target.tagName==='SELECT'&&e.target.dataset.k)e.target.dispatchEvent(new Event('input',{bubbles:true}));});
 
+/* ---------- Zahlungen vom Kurzbefehl (Apple Pay) ---------- */
+function handleIncoming(){
+  let q;try{q=new URLSearchParams(location.search);}catch(e){return;}
+  if(!q.has('betrag')&&!q.has('wo'))return;
+  const raw=(q.get('betrag')||'').trim(), note=(q.get('wo')||'').trim(), a=parseAmount(raw);
+  try{history.replaceState(null,'',location.pathname+'#ausgaben');}catch(e){location.hash='#ausgaben';}
+  const sig=raw+'|'+note, now=Date.now();
+  try{const l=JSON.parse(localStorage.getItem(KEY+'.last')||'null');if(l&&l.sig===sig&&now-l.t<120000)return;localStorage.setItem(KEY+'.last',JSON.stringify({sig,t:now}));}catch(e){}
+  if(!(a>0)){prefill={note};return;}
+  const prev=[...S.tx].reverse().find(t=>t.note&&note&&t.note.toLowerCase()===note.toLowerCase());
+  const names=catNames(), cat=prev&&names.includes(prev.cat)?prev.cat:(names.includes('Sonstiges')?'Sonstiges':names[0]);
+  const t={id:uid(),date:iso(new Date()),amount:a,cat,note,ap:true};S.tx.push(t);save();justAdded=t.id;
+}
+handleIncoming();
 route();
 })();
 </script>
