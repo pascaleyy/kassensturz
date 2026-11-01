@@ -229,15 +229,15 @@ function sample(){
     budgets:[{id:uid(),cat:'Lebensmittel',amount:280},{id:uid(),cat:'Essen gehen',amount:90},{id:uid(),cat:'Hobbys',amount:60},{id:uid(),cat:'Gaming',amount:30},{id:uid(),cat:'Shopping',amount:70},{id:uid(),cat:'Drogerie',amount:35},{id:uid(),cat:'Sonstiges',amount:40}],
     tx, goal:{name:'Neuer PC',amount:1200,saved:150,by:iso(new Date(today.getFullYear(),today.getMonth()+8,1)).slice(0,7)}};
 }
-function blank(){return {sample:false,income:[],fixed:[],subs:[],cats:defCats(),budgets:DEFAULT_CATS.slice(0,4).map(c=>({id:uid(),cat:c,amount:0})),tx:[],paid:{},goal:{name:'',amount:0,saved:0,by:''}};}
-function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&Array.isArray(s.tx)){const fix=o=>{if(o.cat==='Freizeit')o.cat='Hobbys';};s.tx.forEach(fix);(s.budgets||[]).forEach(fix);s.paid=s.paid||{};return s;}}catch(e){}return null;}
-let S=load()||sample();S.paid=S.paid||{};if(!Array.isArray(S.cats)||!S.cats.length)S.cats=defCats();
+function blank(){return {sample:false,income:[],fixed:[],subs:[],cats:defCats(),budgets:DEFAULT_CATS.slice(0,4).map(c=>({id:uid(),cat:c,amount:0})),tx:[],paid:{},extra:[],goal:{name:'',amount:0,saved:0,by:''}};}
+function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&Array.isArray(s.tx)){const fix=o=>{if(o.cat==='Freizeit')o.cat='Hobbys';};s.tx.forEach(fix);(s.budgets||[]).forEach(fix);s.paid=s.paid||{};s.extra=s.extra||[];return s;}}catch(e){}return null;}
+let S=load()||sample();S.paid=S.paid||{};S.extra=S.extra||[];if(!Array.isArray(S.cats)||!S.cats.length)S.cats=defCats();
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){}}
 
 /* ---------- Berechnung ---------- */
 function calc(){
   const now=new Date(), ym=iso(now).slice(0,7);
-  const planned=sum(S.income), hasPaid=S.paid&&S.paid[ym]!=null, income=hasPaid?+S.paid[ym]:planned, fixed=sum(S.fixed), subs=S.subs.reduce((s,x)=>s+monthly(x),0), budgets=sum(S.budgets);
+  const planned=sum(S.income), hasPaid=S.paid&&S.paid[ym]!=null, salary=hasPaid?+S.paid[ym]:planned, extraList=S.extra.filter(t=>t.date.startsWith(ym)), extra=sum(extraList), income=salary+extra, fixed=sum(S.fixed), subs=S.subs.reduce((s,x)=>s+monthly(x),0), budgets=sum(S.budgets);
   const monthTx=S.tx.filter(t=>t.date.startsWith(ym)), spent=sum(monthTx);
   const free=income-fixed-subs, left=free-spent;
   const dim=new Date(now.getFullYear(),now.getMonth()+1,0).getDate(), day=now.getDate(), daysLeft=dim-day+1;
@@ -245,8 +245,8 @@ function calc(){
   const cut=iso(addDays(now,-29)), last30=S.tx.filter(t=>t.date>=cut&&t.date<=iso(now));
   const mon=addDays(now,-((now.getDay()+6)%7));
   const weeks=[];for(let w=5;w>=0;w--){const a=addDays(mon,-7*w),b=addDays(a,6);const ai=iso(a),bi=iso(b);weeks.push({kw:isoWeek(a),from:a,sum:sum(S.tx.filter(t=>t.date>=ai&&t.date<=bi)),now:w===0});}
-  const hist=[];for(let k=5;k>=0;k--){const d=new Date(now.getFullYear(),now.getMonth()-k,1),y=iso(d).slice(0,7);const inc=(S.paid&&S.paid[y]!=null)?+S.paid[y]:planned;const out=fixed+subs+sum(S.tx.filter(t=>t.date.startsWith(y)));hist.push({d,y,inc,out,now:k===0});}
-  return {now,ym,planned,hasPaid,hist,income,fixed,subs,budgets,spent,free,left,dim,day,daysLeft,perDay:left/daysLeft,catMonth:byCat(monthTx),last30,cat30:byCat(last30),sum30:sum(last30),weeks,buffer:free-budgets};
+  const hist=[];for(let k=5;k>=0;k--){const d=new Date(now.getFullYear(),now.getMonth()-k,1),y=iso(d).slice(0,7);const inc=(S.paid&&S.paid[y]!=null)?+S.paid[y]:planned;const inc2=inc+sum(S.extra.filter(t=>t.date.startsWith(y)));const out=fixed+subs+sum(S.tx.filter(t=>t.date.startsWith(y)));hist.push({d,y,inc:inc2,out,now:k===0});}
+  return {now,ym,planned,hasPaid,hist,salary,extra,extraList,income,fixed,subs,budgets,spent,free,left,dim,day,daysLeft,perDay:left/daysLeft,catMonth:byCat(monthTx),last30,cat30:byCat(last30),sum30:sum(last30),weeks,buffer:free-budgets};
 }
 
 /* ---------- Ansichten ---------- */
@@ -290,18 +290,28 @@ function vOverview(){
     <label class="f">${m.hasPaid?'Bekommen':'Noch nicht bestätigt, eingeplant sind '+money0(m.planned)+'. Trag ein, was wirklich kam:'}<input class="num" id="paid" inputmode="decimal" value="${m.hasPaid?fmtIn(S.paid[m.ym]):''}" placeholder="${fmtIn(m.planned)||'0,00'}"></label>
     <div class="flow">${seg(m.fixed,'var(--c6)')}${seg(m.subs,'var(--c5)')}${seg(m.spent,'var(--c1)')}${seg(Math.max(m.left,0),'var(--c2)')}</div>
     <div class="calc">
-      <div><span>Gehalt</span><span class="num">${money(m.income)}</span></div>
+      <div><span>Gehalt</span><span class="num">${money(m.salary)}</span></div>${m.extra>0?`<div><span>+ Sonderzahlungen</span><span class="num">${money(m.extra)}</span></div>`:''}
       <div><span><span class="dot" style="background:var(--c6);display:inline-block;margin-right:8px"></span>− Fixkosten</span><span class="num">${money(m.fixed)}</span></div>
       <div><span><span class="dot" style="background:var(--c5);display:inline-block;margin-right:8px"></span>− Abos</span><span class="num">${money(m.subs)}</span></div>
       <div><span><span class="dot" style="background:var(--c1);display:inline-block;margin-right:8px"></span>− Ausgegeben bisher</span><span class="num">${money(m.spent)}</span></div>
       <div class="tot" style="color:var(--${over?'bad':'good'})"><span>${over?'Im Minus':'Übrig'}</span><span class="num">${money(m.left)}</span></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div class="card-head"><h3>Sonderzahlungen</h3><span class="muted small">Weihnachtsgeld, Rückzahlungen, Geschenke</span></div>
+      ${m.extraList.length?`<div class="list">${[...m.extraList].sort((a,b)=>b.date.localeCompare(a.date)).map(t=>`<div class="item"><span class="dot" style="background:var(--good)"></span><div class="txt"><b>${esc(t.note||'Sonderzahlung')}</b><span>${dayLabel(t.date)}</span></div><span class="num" style="color:var(--good)">+${money(t.amount)}</span><button class="x${armed==='ex'+t.id?' armed':''}" data-act="delextra" data-id="${t.id}" aria-label="Sonderzahlung löschen">${armed==='ex'+t.id?'Löschen':'×'}</button></div>`).join('')}</div>`:''}
+      <div id="extraform" hidden style="display:flex;flex-direction:column;gap:10px">
+        <label class="f">Was war es?<input id="ex-note" placeholder="z. B. Weihnachtsgeld, Strom-Rückzahlung"></label>
+        <div class="two"><label class="f">Betrag €<input class="num" id="ex-amount" inputmode="decimal" placeholder="0,00"></label><label class="f">Datum<input type="date" id="ex-date" value="${iso(new Date())}"></label></div>
+        <button class="btn" data-act="addextra">Sonderzahlung eintragen</button>
+      </div>
+      <button class="btn-line" data-act="showextra" id="ex-toggle">+ Sonderzahlung eintragen</button>
     </div>
     <p class="small muted">${over?'Du hast diesen Monat schon mehr ausgegeben, als reingekommen ist. Ab jetzt nur noch das Nötigste.':(m.free-Math.max(m.budgets,m.spent)<0?'Achtung: Wenn du alle Budgets voll ausschöpfst, reicht das Gehalt nicht. Kürz ein Budget im Plan.':'Auch wenn du alle Budgets voll ausschöpfst, bleibst du im Rahmen.')}</p>
   </section>
   <section class="card">
     <div class="card-head"><h2>Rein und raus</h2><span class="muted small">letzte 6 Monate</span></div>
     <div class="list">${m.hist.map(h=>{const d=h.inc-h.out;return `<div class="item"><div class="txt"><b>${esc(h.d.toLocaleDateString('de-DE',{month:'long',year:'numeric'}))}${h.now?' <span class="muted" style="font-weight:400">· läuft</span>':''}</b><span>rein <span class="num">${money0(h.inc)}</span> · raus <span class="num">${money0(h.out)}</span></span></div><span class="pill ${d<0?'bad':'good'}"><span class="num">${d<0?'−':'+'}${money0(Math.abs(d)).replace('-','')}</span></span></div>`;}).join('')}</div>
-    <p class="small muted">Raus = Fixkosten + Abos + eingetragene Ausgaben. Für frühere Monate zählen nur deine Einträge.</p>
+    <p class="small muted">Rein = Gehalt + Sonderzahlungen. Raus = Fixkosten + Abos + eingetragene Ausgaben. Für frühere Monate zählen nur deine Einträge.</p>
   </section>
   ${brows?`<section class="card"><div class="card-head"><h2>Budgets im ${esc(monthName(m.now))}</h2><span class="muted small">Tag ${m.day} von ${m.dim}</span></div><div class="rows">${brows}</div></section>`:''}
   <section class="card">
@@ -374,6 +384,7 @@ function calcBox(m){return `<div><span>Einnahmen</span><span class="num">${money
 function vSparen(){
   const m=calc(), tips=[];
   const add=(st,html)=>tips.push(`<div class="tip"><span class="mark" style="background:var(--${st})"></span><p>${html}</p></div>`);
+  if(m.extra>0)add('good',`Du hast diesen Monat <b class="num">${money0(m.extra)}</b> extra bekommen. Leg am besten mindestens die Hälfte davon direkt aufs Sparkonto, bevor sie im Alltag verschwindet.`);
   if(m.income>0){
     if(m.buffer>0)add('good',`Nach Fixkosten, Abos und Budgets bleiben dir <b class="num">${money0(m.buffer)}</b> im Monat übrig. Richte am Monatsanfang einen <b>Dauerauftrag</b> über diesen Betrag aufs Tagesgeldkonto ein, dann gibst du es gar nicht erst aus.`);
     else if(m.buffer<0)add('bad',`Deine Budgets sind <b class="num">${money0(-m.buffer)}</b> größer als das, was nach Fixkosten übrig bleibt. Kürz zuerst die Budgets, sonst gehst du jeden Monat ins Minus.`);
@@ -444,9 +455,12 @@ document.addEventListener('submit',e=>{
 document.addEventListener('click',e=>{
   const b=e.target.closest('[data-act]');if(!b)return;
   const act=b.dataset.act;
-  if(act!=='deltx'&&act!=='wipe'&&act!=='delcat')armed=null;
+  if(!['deltx','wipe','delcat','delextra'].includes(act))armed=null;
   if(act==='deltx'){const id=b.dataset.id;if(armed===id){S.tx=S.tx.filter(t=>t.id!==id);armed=null;touch();toast('Gelöscht');}else armed=id;render(true);}
   else if(act==='addrow'){const k=b.dataset.k;S[k].push(k==='budgets'?{id:uid(),cat:catNames().find(c=>!S.budgets.some(x=>x.cat===c))||'Sonstiges',amount:0}:{id:uid(),name:'',amount:0,interval:'monat'});touch();render(true);const ins=app.querySelectorAll(`[data-k="${k}"][data-f="${k==='budgets'?'amount':'name'}"]`);ins.length&&ins[ins.length-1].focus();}
+  else if(act==='showextra'){document.getElementById('extraform').hidden=false;b.hidden=true;document.getElementById('ex-note').focus();}
+  else if(act==='addextra'){const a=parseAmount(document.getElementById('ex-amount').value);if(!(a>0)){toast('Gib einen Betrag größer als 0 ein');return;}S.extra.push({id:uid(),date:document.getElementById('ex-date').value||iso(new Date()),amount:a,note:document.getElementById('ex-note').value.trim()});touch();render(true);toast('+'+money(a)+' eingetragen');}
+  else if(act==='delextra'){const id=b.dataset.id;if(armed==='ex'+id){S.extra=S.extra.filter(t=>t.id!==id);armed=null;touch();toast('Gelöscht');}else armed='ex'+id;render(true);}
   else if(act==='addcat'){const used=S.cats.map(c=>c.c);let col=0;while(used.includes(col)&&col<NCOL-1)col++;S.cats.push({id:uid(),name:'Neue Kategorie',c:col});touch();render(true);const ins=app.querySelectorAll('[data-cat]');const l=ins[ins.length-1];if(l){l.focus();l.select();}}
   else if(act==='cyclecolor'){const c=S.cats.find(x=>x.id===b.dataset.id);if(c){c.c=(c.c+1)%NCOL;touch();render(true);}}
   else if(act==='delcat'){const id=b.dataset.id;if(armed==='cat'+id){const c=S.cats.find(x=>x.id===id);if(c){if(S.cats.length<=1){toast('Mindestens eine Kategorie muss bleiben');}else{S.cats=S.cats.filter(x=>x.id!==id);let fb=S.cats.find(x=>x.name==='Sonstiges');if(!fb&&S.tx.some(t=>t.cat===c.name)){fb={id:uid(),name:'Sonstiges',c:7};S.cats.push(fb);}S.tx.forEach(t=>{if(t.cat===c.name)t.cat=fb.name;});S.budgets=S.budgets.filter(x=>x.cat!==c.name);toast('Kategorie gelöscht');}}armed=null;touch();}else armed='cat'+id;render(true);}
